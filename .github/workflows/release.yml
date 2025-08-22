@@ -24,7 +24,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Ask the action what it *would* do
+      # Ask the action what it *would* do (includes the 'v' prefix)
       - id: plan
         uses: mathieudutour/github-tag-action@v6.2
         with:
@@ -36,13 +36,14 @@ jobs:
           tag_prefix: 'v'
           dry_run: true
 
-      # If latest tag on `main` is already vX.Y.Z-beta.N, force next to -beta.(N+1)
+      # If latest tag on main is already vX.Y.Z-beta.N, force next to -beta.(N+1)
       - id: decide
         shell: bash
         run: |
           set -euo pipefail
           git fetch --tags --force
-          LAST="$(git tag --list 'v*' --sort=-v:refname | head -n1 || true)"
+          # Only tags that start with 'v' followed by a digit (avoid 'vv...')
+          LAST="$(git tag --list 'v[0-9]*' --sort=-v:refname | head -n1 || true)"
           PLANNED="${{ steps.plan.outputs.new_tag }}"
           NEW_TAG=""
           PRERELEASE="false"
@@ -91,7 +92,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Create the *exact* tag we decided
+      # Create the *exact* tag we decided.
+      # IMPORTANT: tag_prefix is '' here because custom_tag already includes 'v'.
       - id: tag
         uses: mathieudutour/github-tag-action@v6.2
         with:
@@ -100,7 +102,7 @@ jobs:
           release_branches: release
           append_to_pre_release_tag: beta
           default_prerelease_bump: preminor
-          tag_prefix: 'v'
+          tag_prefix: ''                          # ← prevent double 'v'
           custom_tag: ${{ needs.plan.outputs.next_tag }}
 
       - name: Stop if tag wasn't created
