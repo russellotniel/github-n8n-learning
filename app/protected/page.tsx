@@ -30,7 +30,7 @@ export default async function ProtectedPage() {
       <div>
         <h2 className="font-bold text-2xl mb-4">Next steps</h2>
         <FetchDataSteps />
-        Try Fix 2 gan
+        Try Fix 2.1 gan
       </div>
     </div>
   );
