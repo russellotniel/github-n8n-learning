@@ -18,13 +18,13 @@ jobs:
     name: Plan next version
     runs-on: ubuntu-latest
     outputs:
-      next_tag: ${{ steps.decide.outputs.new_tag }}
+      next_tag:   ${{ steps.decide.outputs.new_tag }}
       prerelease: ${{ steps.decide.outputs.prerelease }}
-      has_tag: ${{ steps.decide.outputs.has_tag }}
+      has_tag:    ${{ steps.decide.outputs.has_tag }}
     steps:
       - uses: actions/checkout@v4
 
-      # Ask the action what it *would* do (includes the 'v' prefix)
+      # Ask the action what it would do (still useful as a fallback)
       - id: plan
         uses: mathieudutour/github-tag-action@v6.2
         with:
@@ -36,29 +36,58 @@ jobs:
           tag_prefix: 'v'
           dry_run: true
 
-      # If latest tag on main is already vX.Y.Z-beta.N, force next to -beta.(N+1)
+      # Decide the exact tag we want:
+      # - on main: if the latest tag is already a beta, bump its counter
+      # - on release: if there is a merged beta tag, drop the suffix and publish that base
+      # - otherwise: fall back to the action's planned tag
       - id: decide
         shell: bash
         run: |
           set -euo pipefail
           git fetch --tags --force
-          # Only tags that start with 'v' followed by a digit (avoid 'vv...')
-          LAST="$(git tag --list 'v[0-9]*' --sort=-v:refname | head -n1 || true)"
+
+          BRANCH="${{ github.ref_name }}"
           PLANNED="${{ steps.plan.outputs.new_tag }}"
           NEW_TAG=""
           PRERELEASE="false"
           HAS="false"
 
-          if [[ -n "$PLANNED" ]]; then HAS="true"; fi
+          # Helper: highest tag by semver among tags merged into HEAD
+          latest_merged_tag() {
+            git tag --merged HEAD --list "$1" --sort=-v:refname | head -n1 || true
+          }
 
-          if [[ "${{ github.ref_name }}" == "main" && "$LAST" =~ ^v([0-9]+\.[0-9]+\.[0-9]+)-beta\.([0-9]+)$ ]]; then
-            base="${BASH_REMATCH[1]}"
-            n="${BASH_REMATCH[2]}"
-            NEW_TAG="v${base}-beta.$((n+1))"
-            PRERELEASE="true"
+          if [[ "$BRANCH" == "main" ]]; then
+            # If we're already on a beta line, force bump the beta counter
+            LAST_BETA="$(latest_merged_tag 'v[0-9]*-beta.*')"
+            if [[ "$LAST_BETA" =~ ^v([0-9]+\.[0-9]+\.[0-9]+)-beta\.([0-9]+)$ ]]; then
+              base="${BASH_REMATCH[1]}"; n="${BASH_REMATCH[2]}"
+              NEW_TAG="v${base}-beta.$((n+1))"
+              PRERELEASE="true"; HAS="true"
+            else
+              NEW_TAG="$PLANNED"
+              [[ -n "$NEW_TAG" ]] && HAS="true"
+              [[ "$NEW_TAG" == *"-beta."* ]] && PRERELEASE="true"
+            fi
+
+          elif [[ "$BRANCH" == "release" ]]; then
+            # Promote the HIGHEST merged beta to a final by dropping -beta.N
+            LAST_BETA="$(latest_merged_tag 'v[0-9]*-beta.*')"
+            if [[ "$LAST_BETA" =~ ^v([0-9]+\.[0-9]+\.[0-9]+)-beta\.[0-9]+$ ]]; then
+              base="${BASH_REMATCH[1]}"
+              NEW_TAG="v${base}"
+              PRERELEASE="false"; HAS="true"
+            else
+              # No beta found → allow normal behavior (e.g., direct hotfix to release)
+              NEW_TAG="$PLANNED"
+              [[ -n "$NEW_TAG" ]] && HAS="true"
+              [[ "$NEW_TAG" == *"-beta."* ]] && PRERELEASE="true" || PRERELEASE="false"
+            fi
           else
+            # Shouldn't happen (we only trigger on main/release), but be safe
             NEW_TAG="$PLANNED"
-            [[ "$PLANNED" == *"-beta."* ]] && PRERELEASE="true" || PRERELEASE="false"
+            [[ -n "$NEW_TAG" ]] && HAS="true"
+            [[ "$NEW_TAG" == *"-beta."* ]] && PRERELEASE="true"
           fi
 
           echo "new_tag=$NEW_TAG"       >> "$GITHUB_OUTPUT"
@@ -92,8 +121,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Create the *exact* tag we decided.
-      # IMPORTANT: tag_prefix is '' here because custom_tag already includes 'v'.
+      # Create exactly the tag we decided (custom_tag already includes 'v')
       - id: tag
         uses: mathieudutour/github-tag-action@v6.2
         with:
@@ -102,7 +130,7 @@ jobs:
           release_branches: release
           append_to_pre_release_tag: beta
           default_prerelease_bump: preminor
-          tag_prefix: ''                          # ← prevent double 'v'
+          tag_prefix: ''                          # avoid double 'v'
           custom_tag: ${{ needs.plan.outputs.next_tag }}
 
       - name: Stop if tag wasn't created
@@ -122,7 +150,6 @@ jobs:
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
-
       - uses: docker/setup-buildx-action@v3
 
       - name: Build & push Docker image (single tag)
