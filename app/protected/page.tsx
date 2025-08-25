@@ -30,7 +30,7 @@ export default async function ProtectedPage() {
       <div>
         <h2 className="font-bold text-2xl mb-4">Next steps</h2>
         <FetchDataSteps />
-        Pura pura fix
+        Fix 1 ges
       </div>
     </div>
   );
