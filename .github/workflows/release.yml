@@ -23,8 +23,11 @@ jobs:
       has_tag:    ${{ steps.decide.outputs.has_tag }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0    # full history
+          fetch-tags: true  # and all tags
 
-      # Ask the action what it would do (still useful as a fallback)
+      # Ask the action what it would do (fallback if no special handling)
       - id: plan
         uses: mathieudutour/github-tag-action@v6.2
         with:
@@ -36,10 +39,10 @@ jobs:
           tag_prefix: 'v'
           dry_run: true
 
-      # Decide the exact tag we want:
-      # - on main: if the latest tag is already a beta, bump its counter
-      # - on release: if there is a merged beta tag, drop the suffix and publish that base
-      # - otherwise: fall back to the action's planned tag
+      # Decide exact tag:
+      # - main: if already on a beta line, bump beta counter to ...-beta.N+1
+      # - release: if a beta exists in history, drop '-beta.N' and publish vX.Y.Z
+      # - otherwise: use action's planned tag
       - id: decide
         shell: bash
         run: |
@@ -48,17 +51,14 @@ jobs:
 
           BRANCH="${{ github.ref_name }}"
           PLANNED="${{ steps.plan.outputs.new_tag }}"
-          NEW_TAG=""
-          PRERELEASE="false"
-          HAS="false"
+          NEW_TAG="" PRERELEASE="false" HAS="false"
 
-          # Helper: highest tag by semver among tags merged into HEAD
+          # helper: highest semver tag that is merged into HEAD
           latest_merged_tag() {
             git tag --merged HEAD --list "$1" --sort=-v:refname | head -n1 || true
           }
 
           if [[ "$BRANCH" == "main" ]]; then
-            # If we're already on a beta line, force bump the beta counter
             LAST_BETA="$(latest_merged_tag 'v[0-9]*-beta.*')"
             if [[ "$LAST_BETA" =~ ^v([0-9]+\.[0-9]+\.[0-9]+)-beta\.([0-9]+)$ ]]; then
               base="${BASH_REMATCH[1]}"; n="${BASH_REMATCH[2]}"
@@ -71,20 +71,17 @@ jobs:
             fi
 
           elif [[ "$BRANCH" == "release" ]]; then
-            # Promote the HIGHEST merged beta to a final by dropping -beta.N
             LAST_BETA="$(latest_merged_tag 'v[0-9]*-beta.*')"
             if [[ "$LAST_BETA" =~ ^v([0-9]+\.[0-9]+\.[0-9]+)-beta\.[0-9]+$ ]]; then
               base="${BASH_REMATCH[1]}"
               NEW_TAG="v${base}"
               PRERELEASE="false"; HAS="true"
             else
-              # No beta found → allow normal behavior (e.g., direct hotfix to release)
               NEW_TAG="$PLANNED"
               [[ -n "$NEW_TAG" ]] && HAS="true"
               [[ "$NEW_TAG" == *"-beta."* ]] && PRERELEASE="true" || PRERELEASE="false"
             fi
           else
-            # Shouldn't happen (we only trigger on main/release), but be safe
             NEW_TAG="$PLANNED"
             [[ -n "$NEW_TAG" ]] && HAS="true"
             [[ "$NEW_TAG" == *"-beta."* ]] && PRERELEASE="true"
@@ -112,6 +109,7 @@ jobs:
           push: false
           cache-from: type=gha
           cache-to: type=gha,mode=max
+      # place optional smoke tests here
 
   finalize:
     name: Tag, Release & Push
