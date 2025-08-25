@@ -30,7 +30,7 @@ export default async function ProtectedPage() {
       <div>
         <h2 className="font-bold text-2xl mb-4">Next steps</h2>
         <FetchDataSteps />
-        Fix 1.1 ges buat 0.6.4-beta.3 after new workflow
+        Coba naik ke 0.6.5-beta.0
       </div>
     </div>
   );
