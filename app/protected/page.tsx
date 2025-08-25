@@ -30,7 +30,7 @@ export default async function ProtectedPage() {
       <div>
         <h2 className="font-bold text-2xl mb-4">Next steps</h2>
         <FetchDataSteps />
-        Fix 1.1 ges buat 0.6.2-beta.1
+        Fix 1.1 ges buat 0.6.2-beta.2
       </div>
     </div>
   );
