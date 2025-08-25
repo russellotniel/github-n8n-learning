@@ -24,10 +24,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0    # full history
-          fetch-tags: true  # and all tags
+          fetch-depth: 0
+          fetch-tags: true
 
-      # Ask the action what it would do (fallback if no special handling)
+      # Ask the action what it would do (fallback)
       - id: plan
         uses: mathieudutour/github-tag-action@v6.2
         with:
@@ -40,9 +40,9 @@ jobs:
           dry_run: true
 
       # Decide exact tag:
-      # - main: if already on a beta line, bump beta counter to ...-beta.N+1
-      # - release: if a beta exists in history, drop '-beta.N' and publish vX.Y.Z
-      # - otherwise: use action's planned tag
+      # - main: if last merged tag is beta and NO final tag with same base exists anywhere, bump beta.N → N+1
+      #         otherwise start a new cycle from the planner (prepatch/preminor/etc.)
+      # - release: if a merged beta exists, drop -beta.N; else use planner (for direct hotfixes)
       - id: decide
         shell: bash
         run: |
@@ -53,17 +53,25 @@ jobs:
           PLANNED="${{ steps.plan.outputs.new_tag }}"
           NEW_TAG="" PRERELEASE="false" HAS="false"
 
-          # helper: highest semver tag that is merged into HEAD
           latest_merged_tag() {
             git tag --merged HEAD --list "$1" --sort=-v:refname | head -n1 || true
           }
 
           if [[ "$BRANCH" == "main" ]]; then
             LAST_BETA="$(latest_merged_tag 'v[0-9]*-beta.*')"
+            echo "main: last merged beta: ${LAST_BETA:-<none>}"
             if [[ "$LAST_BETA" =~ ^v([0-9]+\.[0-9]+\.[0-9]+)-beta\.([0-9]+)$ ]]; then
               base="${BASH_REMATCH[1]}"; n="${BASH_REMATCH[2]}"
-              NEW_TAG="v${base}-beta.$((n+1))"
-              PRERELEASE="true"; HAS="true"
+              # If a final tag with the same base exists anywhere, that beta line is closed
+              if git tag --list "v${base}" | grep -q . ; then
+                echo "main: final v${base} exists somewhere → start new cycle from planner"
+                NEW_TAG="$PLANNED"
+                [[ -n "$NEW_TAG" ]] && HAS="true"
+                [[ "$NEW_TAG" == *"-beta."* ]] && PRERELEASE="true" || PRERELEASE="false"
+              else
+                NEW_TAG="v${base}-beta.$((n+1))"
+                PRERELEASE="true"; HAS="true"
+              fi
             else
               NEW_TAG="$PLANNED"
               [[ -n "$NEW_TAG" ]] && HAS="true"
@@ -72,6 +80,7 @@ jobs:
 
           elif [[ "$BRANCH" == "release" ]]; then
             LAST_BETA="$(latest_merged_tag 'v[0-9]*-beta.*')"
+            echo "release: last merged beta: ${LAST_BETA:-<none>}"
             if [[ "$LAST_BETA" =~ ^v([0-9]+\.[0-9]+\.[0-9]+)-beta\.[0-9]+$ ]]; then
               base="${BASH_REMATCH[1]}"
               NEW_TAG="v${base}"
@@ -87,6 +96,8 @@ jobs:
             [[ "$NEW_TAG" == *"-beta."* ]] && PRERELEASE="true"
           fi
 
+          echo "Planned: ${PLANNED:-<none>}"
+          echo "Decided: ${NEW_TAG:-<none>} (prerelease=${PRERELEASE})"
           echo "new_tag=$NEW_TAG"       >> "$GITHUB_OUTPUT"
           echo "prerelease=$PRERELEASE" >> "$GITHUB_OUTPUT"
           echo "has_tag=$HAS"           >> "$GITHUB_OUTPUT"
@@ -109,7 +120,6 @@ jobs:
           push: false
           cache-from: type=gha
           cache-to: type=gha,mode=max
-      # place optional smoke tests here
 
   finalize:
     name: Tag, Release & Push
@@ -119,7 +129,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Create exactly the tag we decided (custom_tag already includes 'v')
       - id: tag
         uses: mathieudutour/github-tag-action@v6.2
         with:
@@ -128,7 +137,7 @@ jobs:
           release_branches: release
           append_to_pre_release_tag: beta
           default_prerelease_bump: preminor
-          tag_prefix: ''                          # avoid double 'v'
+          tag_prefix: ''                  # custom_tag already has 'v'
           custom_tag: ${{ needs.plan.outputs.next_tag }}
 
       - name: Stop if tag wasn't created
