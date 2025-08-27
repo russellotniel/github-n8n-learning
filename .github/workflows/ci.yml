@@ -12,7 +12,32 @@ jobs:
       # Your app build/tests (example for Node/Next.js)
       - uses: actions/setup-node@v4
         with: { node-version: '22' }
+      
+      - name: Cache dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-node-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-node-
+      
       - run: npm ci
+      
+      # Code quality and security checks
+      - name: Run ESLint
+        run: npm run lint
+        continue-on-error: false
+      
+      - name: Run TypeScript type check
+        run: npx tsc --noEmit
+      
+      - name: Security audit
+        run: npm audit --audit-level high
+        continue-on-error: false
+      
+      - name: Check for outdated dependencies
+        run: npm outdated || true
+      
       - run: npm run build
       - run: npm test --if-present
 
