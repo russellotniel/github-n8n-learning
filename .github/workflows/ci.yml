@@ -25,7 +25,7 @@ jobs:
       
       # Code quality and security checks
       - name: Run ESLint
-        run: npx eslint . --ext .ts,.tsx,.js,.jsx --max-warnings 0
+        run: npm run lint
         continue-on-error: false
       
       - name: Run TypeScript type check
