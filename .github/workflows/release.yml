@@ -63,27 +63,29 @@ jobs:
 
           if [[ "$BRANCH" == "main" ]]; then
             LAST_BETA="$(latest_merged_tag 'v[0-9]*-beta.*')"
+            LAST_PRODUCTION="$(latest_merged_tag 'v[0-9]*' | grep -v 'beta' | head -n1 || true)"
             echo "main: last merged beta: ${LAST_BETA:-<none>}"
+            echo "main: last merged production: ${LAST_PRODUCTION:-<none>}"
+            
             if [[ "$LAST_BETA" =~ ^v([0-9]+\.[0-9]+\.[0-9]+)-beta\.([0-9]+)$ ]]; then
               base="${BASH_REMATCH[1]}"; n="${BASH_REMATCH[2]}"
               
-              # For one-way flow: Check if production tag exists AND is merged into main
-              # If production exists but not merged into main, continue the beta series
-              if git tag --merged HEAD --list "v${base}" | grep -q . ; then
-                echo "main: final v${base} is merged into main → start new cycle from planner"
+              # Check if this beta cycle has been released to production
+              if [[ -n "$LAST_PRODUCTION" ]] && [[ "v${base}" == "$LAST_PRODUCTION" ]]; then
+                echo "main: v${base} has been released → start new cycle from planner"
                 NEW_TAG="$PLANNED"
                 [[ -n "$NEW_TAG" ]] && HAS="true"
                 [[ "$NEW_TAG" == *"-beta."* ]] && PRERELEASE="true" || PRERELEASE="false"
               else
-                echo "main: v${base} exists elsewhere but not merged here → start new version from planner"
-                NEW_TAG="$PLANNED"
-                [[ -n "$NEW_TAG" ]] && HAS="true"
-                [[ "$NEW_TAG" == *"-beta."* ]] && PRERELEASE="true" || PRERELEASE="false"
+                echo "main: v${base} not yet released → continue beta series"
+                NEW_TAG="v${base}-beta.$((n+1))"
+                PRERELEASE="true"; HAS="true"
               fi
             else
+              echo "main: no beta tags found → start new cycle from planner"
               NEW_TAG="$PLANNED"
               [[ -n "$NEW_TAG" ]] && HAS="true"
-              [[ "$NEW_TAG" == *"-beta."* ]] && PRERELEASE="true"
+              [[ "$NEW_TAG" == *"-beta."* ]] && PRERELEASE="true" || PRERELEASE="false"
             fi
 
           elif [[ "$BRANCH" == "release" ]]; then
