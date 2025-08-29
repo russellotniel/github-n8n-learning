@@ -62,13 +62,16 @@ jobs:
             echo "main: last merged beta: ${LAST_BETA:-<none>}"
             if [[ "$LAST_BETA" =~ ^v([0-9]+\.[0-9]+\.[0-9]+)-beta\.([0-9]+)$ ]]; then
               base="${BASH_REMATCH[1]}"; n="${BASH_REMATCH[2]}"
-              # If a final tag with the same base exists anywhere, that beta line is closed
-              if git tag --list "v${base}" | grep -q . ; then
-                echo "main: final v${base} exists somewhere → start new cycle from planner"
+              
+              # For one-way flow: Check if production tag exists AND is merged into main
+              # If production exists but not merged into main, continue the beta series
+              if git tag --merged HEAD --list "v${base}" | grep -q . ; then
+                echo "main: final v${base} is merged into main → start new cycle from planner"
                 NEW_TAG="$PLANNED"
                 [[ -n "$NEW_TAG" ]] && HAS="true"
                 [[ "$NEW_TAG" == *"-beta."* ]] && PRERELEASE="true" || PRERELEASE="false"
               else
+                echo "main: v${base} exists elsewhere but not merged here → continue beta series"
                 NEW_TAG="v${base}-beta.$((n+1))"
                 PRERELEASE="true"; HAS="true"
               fi
