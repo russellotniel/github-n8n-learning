@@ -63,26 +63,35 @@ jobs:
 
           if [[ "$BRANCH" == "main" ]]; then
             LAST_BETA="$(latest_merged_tag 'v[0-9]*-beta.*')"
-            LAST_PRODUCTION="$(latest_merged_tag 'v[0-9]*' | grep -v 'beta' | head -n1 || true)"
+            LAST_PRODUCTION="$(git tag --list 'v[0-9]*' | grep -v 'beta' | sort -V -r | head -n1 || true)"
             echo "main: last merged beta: ${LAST_BETA:-<none>}"
-            echo "main: last merged production: ${LAST_PRODUCTION:-<none>}"
+            echo "main: last production anywhere: ${LAST_PRODUCTION:-<none>}"
             
-            if [[ "$LAST_BETA" =~ ^v([0-9]+\.[0-9]+\.[0-9]+)-beta\.([0-9]+)$ ]]; then
+            # Check if we have beta tags and if they're newer than latest production
+            if [[ -n "$LAST_BETA" ]] && [[ "$LAST_BETA" =~ ^v([0-9]+\.[0-9]+\.[0-9]+)-beta\.([0-9]+)$ ]]; then
               base="${BASH_REMATCH[1]}"; n="${BASH_REMATCH[2]}"
+              echo "main: found beta v${base}-beta.${n}"
               
-              # Check if this beta cycle has been released to production
-              if [[ -n "$LAST_PRODUCTION" ]] && [[ "v${base}" == "$LAST_PRODUCTION" ]]; then
-                echo "main: v${base} has been released → start new cycle from planner"
-                NEW_TAG="$PLANNED"
-                [[ -n "$NEW_TAG" ]] && HAS="true"
-                [[ "$NEW_TAG" == *"-beta."* ]] && PRERELEASE="true" || PRERELEASE="false"
+              # Compare beta base version with latest production using version sort
+              if [[ -n "$LAST_PRODUCTION" ]]; then
+                # If beta base is newer than or equal to latest production, continue beta series
+                if printf '%s\n' "v${base}" "$LAST_PRODUCTION" | sort -V | tail -n1 | grep -q "v${base}"; then
+                  echo "main: beta v${base} >= production ${LAST_PRODUCTION} → continue beta series"
+                  NEW_TAG="v${base}-beta.$((n+1))"
+                  PRERELEASE="true"; HAS="true"
+                else
+                  echo "main: beta v${base} < production ${LAST_PRODUCTION} → start new cycle from planner"
+                  NEW_TAG="$PLANNED"
+                  [[ -n "$NEW_TAG" ]] && HAS="true"
+                  [[ "$NEW_TAG" == *"-beta."* ]] && PRERELEASE="true" || PRERELEASE="false"
+                fi
               else
-                echo "main: v${base} not yet released → continue beta series"
+                echo "main: no production releases → continue beta series"
                 NEW_TAG="v${base}-beta.$((n+1))"
                 PRERELEASE="true"; HAS="true"
               fi
             else
-              echo "main: no beta tags found → start new cycle from planner"
+              echo "main: no valid beta tags → start new cycle from planner"
               NEW_TAG="$PLANNED"
               [[ -n "$NEW_TAG" ]] && HAS="true"
               [[ "$NEW_TAG" == *"-beta."* ]] && PRERELEASE="true" || PRERELEASE="false"
