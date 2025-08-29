@@ -71,9 +71,10 @@ jobs:
                 [[ -n "$NEW_TAG" ]] && HAS="true"
                 [[ "$NEW_TAG" == *"-beta."* ]] && PRERELEASE="true" || PRERELEASE="false"
               else
-                echo "main: v${base} exists elsewhere but not merged here → continue beta series"
-                NEW_TAG="v${base}-beta.$((n+1))"
-                PRERELEASE="true"; HAS="true"
+                echo "main: v${base} exists elsewhere but not merged here → start new version from planner"
+                NEW_TAG="$PLANNED"
+                [[ -n "$NEW_TAG" ]] && HAS="true"
+                [[ "$NEW_TAG" == *"-beta."* ]] && PRERELEASE="true" || PRERELEASE="false"
               fi
             else
               NEW_TAG="$PLANNED"
