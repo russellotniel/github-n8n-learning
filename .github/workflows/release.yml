@@ -35,8 +35,12 @@ jobs:
           pre_release_branches: main
           release_branches: release
           append_to_pre_release_tag: beta
-          default_prerelease_bump: preminor
+          default_prerelease_bump: patch
           tag_prefix: 'v'
+          custom_release_rules: |
+            fix:patch
+            feat:minor
+            BREAKING CHANGE:major
           dry_run: true
 
       # Decide exact tag:
@@ -62,15 +66,19 @@ jobs:
             echo "main: last merged beta: ${LAST_BETA:-<none>}"
             if [[ "$LAST_BETA" =~ ^v([0-9]+\.[0-9]+\.[0-9]+)-beta\.([0-9]+)$ ]]; then
               base="${BASH_REMATCH[1]}"; n="${BASH_REMATCH[2]}"
-              # If a final tag with the same base exists anywhere, that beta line is closed
-              if git tag --list "v${base}" | grep -q . ; then
-                echo "main: final v${base} exists somewhere → start new cycle from planner"
+              
+              # For one-way flow: Check if production tag exists AND is merged into main
+              # If production exists but not merged into main, continue the beta series
+              if git tag --merged HEAD --list "v${base}" | grep -q . ; then
+                echo "main: final v${base} is merged into main → start new cycle from planner"
                 NEW_TAG="$PLANNED"
                 [[ -n "$NEW_TAG" ]] && HAS="true"
                 [[ "$NEW_TAG" == *"-beta."* ]] && PRERELEASE="true" || PRERELEASE="false"
               else
-                NEW_TAG="v${base}-beta.$((n+1))"
-                PRERELEASE="true"; HAS="true"
+                echo "main: v${base} exists elsewhere but not merged here → start new version from planner"
+                NEW_TAG="$PLANNED"
+                [[ -n "$NEW_TAG" ]] && HAS="true"
+                [[ "$NEW_TAG" == *"-beta."* ]] && PRERELEASE="true" || PRERELEASE="false"
               fi
             else
               NEW_TAG="$PLANNED"
