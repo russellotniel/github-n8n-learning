@@ -35,8 +35,12 @@ jobs:
           pre_release_branches: main
           release_branches: release
           append_to_pre_release_tag: beta
-          default_prerelease_bump: preminor
+          default_prerelease_bump: patch
           tag_prefix: 'v'
+          custom_release_rules: |
+            fix:patch
+            feat:minor
+            BREAKING CHANGE:major
           dry_run: true
 
       # Decide exact tag:
