@@ -30,7 +30,7 @@ export default async function ProtectedPage() {
       <div>
         <h2 className="font-bold text-2xl mb-4">Next steps</h2>
         <FetchDataSteps />
-        Coba fix udh ga tau skrg tag ke brp.
+        Fix untuk naikin beta ke 0.9.1-beta.1
       </div>
     </div>
   );
