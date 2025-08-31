@@ -63,26 +63,35 @@ jobs:
 
           if [[ "$BRANCH" == "main" ]]; then
             LAST_BETA="$(latest_merged_tag 'v[0-9]*-beta.*')"
-            LAST_PRODUCTION="$(latest_merged_tag 'v[0-9]*' | grep -v 'beta' | head -n1 || true)"
+            LAST_PRODUCTION="$(git tag --list 'v[0-9]*' | grep -v 'beta' | sort -V -r | head -n1 || true)"
             echo "main: last merged beta: ${LAST_BETA:-<none>}"
-            echo "main: last merged production: ${LAST_PRODUCTION:-<none>}"
+            echo "main: last production anywhere: ${LAST_PRODUCTION:-<none>}"
             
-            if [[ "$LAST_BETA" =~ ^v([0-9]+\.[0-9]+\.[0-9]+)-beta\.([0-9]+)$ ]]; then
+            # Check if we have beta tags and if they're newer than latest production
+            if [[ -n "$LAST_BETA" ]] && [[ "$LAST_BETA" =~ ^v([0-9]+\.[0-9]+\.[0-9]+)-beta\.([0-9]+)$ ]]; then
               base="${BASH_REMATCH[1]}"; n="${BASH_REMATCH[2]}"
+              echo "main: found beta v${base}-beta.${n}"
               
-              # Check if this beta cycle has been released to production
-              if [[ -n "$LAST_PRODUCTION" ]] && [[ "v${base}" == "$LAST_PRODUCTION" ]]; then
-                echo "main: v${base} has been released → start new cycle from planner"
-                NEW_TAG="$PLANNED"
-                [[ -n "$NEW_TAG" ]] && HAS="true"
-                [[ "$NEW_TAG" == *"-beta."* ]] && PRERELEASE="true" || PRERELEASE="false"
+              # Compare beta base version with latest production using version sort
+              if [[ -n "$LAST_PRODUCTION" ]]; then
+                # If beta base is newer than or equal to latest production, continue beta series
+                if printf '%s\n' "v${base}" "$LAST_PRODUCTION" | sort -V | tail -n1 | grep -q "v${base}"; then
+                  echo "main: beta v${base} >= production ${LAST_PRODUCTION} → continue beta series"
+                  NEW_TAG="v${base}-beta.$((n+1))"
+                  PRERELEASE="true"; HAS="true"
+                else
+                  echo "main: beta v${base} < production ${LAST_PRODUCTION} → start new cycle from planner"
+                  NEW_TAG="$PLANNED"
+                  [[ -n "$NEW_TAG" ]] && HAS="true"
+                  [[ "$NEW_TAG" == *"-beta."* ]] && PRERELEASE="true" || PRERELEASE="false"
+                fi
               else
-                echo "main: v${base} not yet released → continue beta series"
+                echo "main: no production releases → continue beta series"
                 NEW_TAG="v${base}-beta.$((n+1))"
                 PRERELEASE="true"; HAS="true"
               fi
             else
-              echo "main: no beta tags found → start new cycle from planner"
+              echo "main: no valid beta tags → start new cycle from planner"
               NEW_TAG="$PLANNED"
               [[ -n "$NEW_TAG" ]] && HAS="true"
               [[ "$NEW_TAG" == *"-beta."* ]] && PRERELEASE="true" || PRERELEASE="false"
@@ -90,20 +99,9 @@ jobs:
 
           elif [[ "$BRANCH" == "release" ]]; then
             LAST_BETA="$(latest_merged_tag 'v[0-9]*-beta.*')"
-            LAST_RELEASE="$(latest_merged_tag 'v[0-9]*' | grep -v 'beta' | head -n1 || true)"
             echo "release: last merged beta: ${LAST_BETA:-<none>}"
-            echo "release: last production release: ${LAST_RELEASE:-<none>}"
-            echo "release: planner suggests: ${PLANNED:-<none>}"
-            
-            # Prefer the planner's suggestion over beta conversion
-            # This allows for proper major/minor version bumps
-            if [[ -n "$PLANNED" ]] && [[ "$PLANNED" != *"-beta."* ]]; then
-              echo "release: using planner's suggestion for major/minor bump"
-              NEW_TAG="$PLANNED"
-              PRERELEASE="false"; HAS="true"
-            elif [[ "$LAST_BETA" =~ ^v([0-9]+\.[0-9]+\.[0-9]+)-beta\.[0-9]+$ ]]; then
+            if [[ "$LAST_BETA" =~ ^v([0-9]+\.[0-9]+\.[0-9]+)-beta\.[0-9]+$ ]]; then
               base="${BASH_REMATCH[1]}"
-              echo "release: converting beta ${LAST_BETA} to production v${base}"
               NEW_TAG="v${base}"
               PRERELEASE="false"; HAS="true"
             else
@@ -112,7 +110,6 @@ jobs:
               [[ "$NEW_TAG" == *"-beta."* ]] && PRERELEASE="true" || PRERELEASE="false"
             fi
           else
-            # Shouldn't happen (we only trigger on main/release), but be safe
             NEW_TAG="$PLANNED"
             [[ -n "$NEW_TAG" ]] && HAS="true"
             [[ "$NEW_TAG" == *"-beta."* ]] && PRERELEASE="true"
@@ -120,24 +117,6 @@ jobs:
 
           echo "Planned: ${PLANNED:-<none>}"
           echo "Decided: ${NEW_TAG:-<none>} (prerelease=${PRERELEASE})"
-          
-          # Debug: Show existing tags and analysis
-          echo "=== DEBUG: Existing tags ==="
-          git tag --list 'v[0-9]*' --sort=-v:refname | head -10
-          echo "=== DEBUG: Beta tags ==="
-          git tag --list 'v[0-9]*-beta.*' --sort=-v:refname | head -5
-          echo "=== DEBUG: Production tags ==="
-          git tag --list 'v[0-9]*' | grep -v 'beta' | sort -V -r | head -5
-          echo "=== DEBUG: Decision process ==="
-          echo "Branch: $BRANCH"
-          echo "Planner output: $PLANNED"
-          
-          # Check if the decided tag already exists
-          if [[ -n "$NEW_TAG" ]] && git tag --list "$NEW_TAG" | grep -q . ; then
-            echo "WARNING: Tag $NEW_TAG already exists! Skipping release creation."
-            HAS="false"
-          fi
-          
           echo "new_tag=$NEW_TAG"       >> "$GITHUB_OUTPUT"
           echo "prerelease=$PRERELEASE" >> "$GITHUB_OUTPUT"
           echo "has_tag=$HAS"           >> "$GITHUB_OUTPUT"
@@ -191,7 +170,6 @@ jobs:
           name: Release ${{ steps.tag.outputs.new_tag }}
           body: ${{ steps.tag.outputs.changelog }}
           prerelease: ${{ needs.plan.outputs.prerelease }}
-          skipIfReleaseExists: true
 
       - name: Login to Docker Hub
         uses: docker/login-action@v3
