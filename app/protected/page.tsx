@@ -30,7 +30,7 @@ export default async function ProtectedPage() {
       <div>
         <h2 className="font-bold text-2xl mb-4">Next steps</h2>
         <FetchDataSteps />
-        Coba pake feat untuk naikin beta ke 0.9.2-beta.0
+        Coba pake feat untuk naikin beta ke 0.9.2-beta.1
       </div>
     </div>
   );
