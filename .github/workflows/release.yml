@@ -74,13 +74,14 @@ jobs:
               
               # Compare beta base version with latest production using version sort
               if [[ -n "$LAST_PRODUCTION" ]]; then
-                # If beta base is newer than or equal to latest production, continue beta series
-                if printf '%s\n' "v${base}" "$LAST_PRODUCTION" | sort -V | tail -n1 | grep -q "v${base}"; then
-                  echo "main: beta v${base} >= production ${LAST_PRODUCTION} → continue beta series"
+                # If beta base is newer than latest production, continue beta series
+                # If beta base equals latest production, that version was released → start new cycle
+                if printf '%s\n' "v${base}" "$LAST_PRODUCTION" | sort -V | tail -n1 | grep -q "v${base}" && [[ "v${base}" != "$LAST_PRODUCTION" ]]; then
+                  echo "main: beta v${base} > production ${LAST_PRODUCTION} → continue beta series"
                   NEW_TAG="v${base}-beta.$((n+1))"
                   PRERELEASE="true"; HAS="true"
                 else
-                  echo "main: beta v${base} < production ${LAST_PRODUCTION} → start new cycle from planner"
+                  echo "main: beta v${base} <= production ${LAST_PRODUCTION} → start new cycle from planner"
                   NEW_TAG="$PLANNED"
                   [[ -n "$NEW_TAG" ]] && HAS="true"
                   [[ "$NEW_TAG" == *"-beta."* ]] && PRERELEASE="true" || PRERELEASE="false"
