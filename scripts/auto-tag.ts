@@ -1,5 +1,5 @@
-// @ts-nocheck
 // Type definitions
+import { execSync } from 'child_process';
 interface Version {
   major: number;
   minor: number;
@@ -30,7 +30,7 @@ function getCurrentBranch(): string {
     if (currentBranch === "main" || currentBranch === "release") {
       try {
         // Get the most recent commit message
-        const commitMessage = require('child_process').execSync('git log -1 --pretty=format:"%s"', { encoding: "utf8" }).trim();
+        const commitMessage = execSync('git log -1 --pretty=format:"%s"', { encoding: "utf8" }).trim();
 
         // Look for merge commit patterns
         const mergeMatch = commitMessage.match(/Merge pull request #\d+ from .+\/(feat|fix)\/(.+)/);
@@ -45,7 +45,7 @@ function getCurrentBranch(): string {
         if (commitMessage.startsWith("fix:") || commitMessage.startsWith("fix(")) {
           return "fix/from-commit";
         }
-      } catch (error) {
+      } catch {
         console.log("Could not detect source branch from commit message");
       }
     }
@@ -54,7 +54,7 @@ function getCurrentBranch(): string {
   }
 
   // Fallback to git command (local usage)
-  return require('child_process').execSync("git rev-parse --abbrev-ref HEAD", { encoding: "utf8" }).trim();
+  return execSync("git rev-parse --abbrev-ref HEAD", { encoding: "utf8" }).trim();
 }
 
 function parseVersion(tag: string): Version | null {
@@ -79,7 +79,7 @@ function formatVersion(version: Version, isBeta: boolean = false): string {
 
 function getAllTags(): string[] {
   try {
-    const tags = require('child_process').execSync("git tag -l", { encoding: "utf8" }).trim();
+    const tags = execSync("git tag -l", { encoding: "utf8" }).trim();
     console.log("Tags", tags);
     return tags ? tags.split("\n") : [];
   } catch {
@@ -173,7 +173,7 @@ function getNextVersion(currentBranch: string): string | null {
 
 function getLatestTag(branch: string): string {
   try {
-    const latestTag = require('child_process').execSync(`git describe --tags --abbrev=0 origin/${branch}`, { encoding: "utf8" }).trim();
+    const latestTag = execSync(`git describe --tags --abbrev=0 origin/${branch}`, { encoding: "utf8" }).trim();
     console.log("Latest Tag", latestTag);
 
     return latestTag;
@@ -184,16 +184,17 @@ function getLatestTag(branch: string): string {
 
 function createTag(tagName: string): boolean {
   try {
-    require('child_process').execSync(`git tag ${tagName}`, { stdio: "inherit" });
+    execSync(`git tag ${tagName}`, { stdio: "inherit" });
     console.log(`Created tag: ${tagName}`);
 
     // Push the tag to remote
-    require('child_process').execSync(`git push origin ${tagName}`, { stdio: "inherit" });
+    execSync(`git push origin ${tagName}`, { stdio: "inherit" });
     console.log(`Pushed tag: ${tagName}`);
 
     return true;
-  } catch (error: any) {
-    console.error(`Failed to create/push tag: ${error.message}`);
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error(`Failed to create/push tag: ${errorMessage}`);
     return false;
   }
 }
