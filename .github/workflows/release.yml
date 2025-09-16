@@ -1,9 +1,13 @@
-# .github/workflows/release.yml
-name: Release (beta on main, prod on release)
+name: Release (beta on main, prod on release) - Hybrid
 
 on:
+  pull_request:
+    branches: [ main ]
+    types: [closed]
   push:
-    branches: [ main, release ]
+    branches: [ release ]
+    tags:
+      - 'v*'
   workflow_dispatch:
 
 permissions:
@@ -14,185 +18,81 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  plan:
-    name: Plan next version
+  # Note: Docker build validation is handled in CI workflow (ci.yml)
+  # This release workflow focuses on tagging and production deployment only
+  tag:
+    name: Create version tag
     runs-on: ubuntu-latest
-    outputs:
-      next_tag:   ${{ steps.decide.outputs.new_tag }}
-      prerelease: ${{ steps.decide.outputs.prerelease }}
-      has_tag:    ${{ steps.decide.outputs.has_tag }}
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/release') || (github.event_name == 'pull_request' && github.event.pull_request.merged == true)
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
           fetch-tags: true
-
-      # Ask the action what it would do (fallback)
-      - id: plan
-        uses: mathieudutour/github-tag-action@v6.2
+      
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
         with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          pre_release_branches: main
-          release_branches: release
-          append_to_pre_release_tag: beta
-          default_prerelease_bump: patch
-          tag_prefix: 'v'
-          custom_release_rules: |
-            fix:patch
-            feat:minor
-            BREAKING CHANGE:major
-          dry_run: true
-
-      # Decide exact tag:
-      # - main: if last merged tag is beta and NO final tag with same base exists anywhere, bump beta.N → N+1
-      #         otherwise start a new cycle from the planner (prepatch/preminor/etc.)
-      # - release: if a merged beta exists, drop -beta.N; else use planner (for direct hotfixes)
-      - id: decide
-        shell: bash
+          node-version: '22'
+      
+      - name: Configure Git
         run: |
-          set -euo pipefail
-          git fetch --tags --force
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+      
+      - name: Run auto-tagging script
+        run: npx tsx scripts/auto-tag.ts
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-          BRANCH="${{ github.ref_name }}"
-          PLANNED="${{ steps.plan.outputs.new_tag }}"
-          NEW_TAG="" PRERELEASE="false" HAS="false"
-
-          latest_merged_tag() {
-            git tag --merged HEAD --list "$1" --sort=-v:refname | head -n1 || true
-          }
-
-          if [[ "$BRANCH" == "main" ]]; then
-            LAST_BETA="$(latest_merged_tag 'v[0-9]*-beta.*')"
-            LAST_PRODUCTION="$(git tag --list 'v[0-9]*' | grep -v 'beta' | sort -V -r | head -n1 || true)"
-            echo "main: last merged beta: ${LAST_BETA:-<none>}"
-            echo "main: last production anywhere: ${LAST_PRODUCTION:-<none>}"
-            
-            # Check if we have beta tags and if they're newer than latest production
-            if [[ -n "$LAST_BETA" ]] && [[ "$LAST_BETA" =~ ^v([0-9]+\.[0-9]+\.[0-9]+)-beta\.([0-9]+)$ ]]; then
-              base="${BASH_REMATCH[1]}"; n="${BASH_REMATCH[2]}"
-              echo "main: found beta v${base}-beta.${n}"
-              
-              # Compare beta base version with latest production using version sort
-              if [[ -n "$LAST_PRODUCTION" ]]; then
-                # If beta base is newer than latest production, continue beta series
-                # If beta base equals latest production, that version was released → start new cycle
-                if printf '%s\n' "v${base}" "$LAST_PRODUCTION" | sort -V | tail -n1 | grep -q "v${base}" && [[ "v${base}" != "$LAST_PRODUCTION" ]]; then
-                  echo "main: beta v${base} > production ${LAST_PRODUCTION} → continue beta series"
-                  NEW_TAG="v${base}-beta.$((n+1))"
-                  PRERELEASE="true"; HAS="true"
-                else
-                  echo "main: beta v${base} <= production ${LAST_PRODUCTION} → start new cycle from planner"
-                  NEW_TAG="$PLANNED"
-                  [[ -n "$NEW_TAG" ]] && HAS="true"
-                  [[ "$NEW_TAG" == *"-beta."* ]] && PRERELEASE="true" || PRERELEASE="false"
-                fi
-              else
-                echo "main: no production releases → continue beta series"
-                NEW_TAG="v${base}-beta.$((n+1))"
-                PRERELEASE="true"; HAS="true"
-              fi
-            else
-              echo "main: no valid beta tags → start new cycle from planner"
-              NEW_TAG="$PLANNED"
-              [[ -n "$NEW_TAG" ]] && HAS="true"
-              [[ "$NEW_TAG" == *"-beta."* ]] && PRERELEASE="true" || PRERELEASE="false"
-            fi
-
-          elif [[ "$BRANCH" == "release" ]]; then
-            LAST_BETA="$(latest_merged_tag 'v[0-9]*-beta.*')"
-            echo "release: last merged beta: ${LAST_BETA:-<none>}"
-            if [[ "$LAST_BETA" =~ ^v([0-9]+\.[0-9]+\.[0-9]+)-beta\.[0-9]+$ ]]; then
-              base="${BASH_REMATCH[1]}"
-              NEW_TAG="v${base}"
-              PRERELEASE="false"; HAS="true"
-            else
-              NEW_TAG="$PLANNED"
-              [[ -n "$NEW_TAG" ]] && HAS="true"
-              [[ "$NEW_TAG" == *"-beta."* ]] && PRERELEASE="true" || PRERELEASE="false"
-            fi
-          else
-            NEW_TAG="$PLANNED"
-            [[ -n "$NEW_TAG" ]] && HAS="true"
-            [[ "$NEW_TAG" == *"-beta."* ]] && PRERELEASE="true"
-          fi
-
-          echo "Planned: ${PLANNED:-<none>}"
-          echo "Decided: ${NEW_TAG:-<none>} (prerelease=${PRERELEASE})"
-          echo "new_tag=$NEW_TAG"       >> "$GITHUB_OUTPUT"
-          echo "prerelease=$PRERELEASE" >> "$GITHUB_OUTPUT"
-          echo "has_tag=$HAS"           >> "$GITHUB_OUTPUT"
-
-  build:
-    name: Build (no publish)
-    needs: plan
-    if: needs.plan.outputs.has_tag == 'true'
+  release:
+    name: Build, push Docker image and create release
     runs-on: ubuntu-latest
+    needs: tag
+    if: github.event_name == 'push' && github.ref == 'refs/heads/release'
     steps:
       - uses: actions/checkout@v4
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/login-action@v3
         with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-      - uses: docker/build-push-action@v5
-        with:
-          context: .
-          push: false
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-  finalize:
-    name: Tag, Release & Push
-    needs: [plan, build]
-    if: needs.plan.outputs.has_tag == 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - id: tag
-        uses: mathieudutour/github-tag-action@v6.2
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          pre_release_branches: main
-          release_branches: release
-          append_to_pre_release_tag: beta
-          default_prerelease_bump: preminor
-          tag_prefix: ''                  # custom_tag already has 'v'
-          custom_tag: ${{ needs.plan.outputs.next_tag }}
-
-      - name: Stop if tag wasn't created
-        if: ${{ steps.tag.outputs.new_tag == '' }}
-        run: echo "No new tag. Exiting." && exit 0
-
-      - name: Publish GitHub Release
-        uses: ncipollo/release-action@v1
-        with:
-          tag:  ${{ steps.tag.outputs.new_tag }}
-          name: Release ${{ steps.tag.outputs.new_tag }}
-          body: ${{ steps.tag.outputs.changelog }}
-          prerelease: ${{ needs.plan.outputs.prerelease }}
-
+          fetch-depth: 0
+          fetch-tags: true
+      
+      - name: Get latest tag
+        id: get_tag
+        run: |
+          echo "tag=$(git describe --tags --abbrev=0)" >> $GITHUB_OUTPUT
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      
       - name: Login to Docker Hub
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
-      - uses: docker/setup-buildx-action@v3
-
-      - name: Build & push Docker image (single tag)
+      
+      - name: Build and push Docker image
         uses: docker/build-push-action@v5
         with:
           context: .
           push: true
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          tags: russellotniel/personal-repository:${{ steps.tag.outputs.new_tag }}
+          tags: |
+            russellotniel/personal-repository:${{ steps.get_tag.outputs.tag }}
       
-      # Post-deployment verification
+      - name: Create GitHub Release
+        uses: ncipollo/release-action@v1
+        with:
+          tag: ${{ steps.get_tag.outputs.tag }}
+          name: Release ${{ steps.get_tag.outputs.tag }}
+          generateReleaseNotes: true
+          draft: false
+          prerelease: false
+      
       - name: Verify deployment
         run: |
-          echo "Deployment completed for tag: ${{ steps.tag.outputs.new_tag }}"
-          echo "Docker image: russellotniel/personal-repository:${{ steps.tag.outputs.new_tag }}"
+          echo "Deployment completed for tag: ${{ steps.get_tag.outputs.tag }}"
+          echo "Docker image: russellotniel/personal-repository:${{ steps.get_tag.outputs.tag }}"
           # Add health check commands here when you have a deployed service
           # curl -f https://your-app.com/health || exit 1
       
@@ -200,7 +100,7 @@ jobs:
         if: always()
         run: |
           if [ "${{ job.status }}" == "success" ]; then
-            echo "✅ Deployment successful for ${{ steps.tag.outputs.new_tag }}"
+            echo "✅ Deployment successful for ${{ steps.get_tag.outputs.tag }}"
           else
-            echo "❌ Deployment failed for ${{ steps.tag.outputs.new_tag }}"
+            echo "❌ Deployment failed for ${{ steps.get_tag.outputs.tag }}"
           fi
