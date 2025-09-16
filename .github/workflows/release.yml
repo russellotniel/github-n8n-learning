@@ -1,9 +1,6 @@
 name: Release (beta on main, prod on release) - Hybrid
 
 on:
-  pull_request:
-    branches: [ main ]
-    types: [closed]
   push:
     branches: [ main, release ]
     tags:
@@ -23,7 +20,7 @@ jobs:
   tag:
     name: Create version tag
     runs-on: ubuntu-latest
-    if: (github.event_name == 'push' && (github.ref == 'refs/heads/release' || github.ref == 'refs/heads/main')) || (github.event_name == 'pull_request' && github.event.pull_request.merged == true)
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/release' || github.ref == 'refs/heads/main')
     steps:
       - uses: actions/checkout@v4
         with:
